@@ -1,0 +1,41 @@
+{
+  "camera": {
+    "sn": "DA3038934"
+  },
+  "traditional_center": {
+    "input_mode": "image",
+    "image": "step3_output/01_original.jpg",
+    "output_dir": "test_output/traditional_center",
+    "camera_wait_key_ms": 1,
+    "log_every_n_frames": 30,
+    "save_lost_frames": 1,
+    "lost_frame_output_dir": "test_output/traditional_center_lost",
+    "hsv": {
+      "lower_red_1": [0, 45, 140],
+      "upper_red_1": [30, 255, 255],
+      "lower_red_2": [165, 80, 120],
+      "upper_red_2": [179, 255, 255],
+      "enable_purple": 1,
+      "lower_purple": [125, 60, 80],
+      "upper_purple": [165, 255, 255]
+    },
+    "morphology": {
+      "close_kernel_size": 3
+    },
+    "components": {
+      "min_area": 30,
+      "max_area_ratio": 0.03,
+      "min_side": 3.0,
+      "max_aspect_ratio": 10.0,
+      "min_fill_ratio": 0.08
+    },
+    "grouping": {
+      "link_factor": 5.0,
+      "min_group_points": 2,
+      "min_points_per_layer": 1,
+      "min_layer_separation_size_ratio": 0.5,
+      "min_separation_ratio": 0.3,
+      "max_horizontal_offset_ratio": 1.0
+    }
+  }
+}

@@ -1,0 +1,14 @@
+# CMake build artifacts
+/build/
+/cmake-build-*/
+
+# Generated test and runtime output
+/test_output/
+/MvSdkLog/
+*.log
+
+# Local scratch log captured during development
+/无标题文档 1
+
+# TensorRT engines are generated for a specific CUDA/TensorRT/GPU environment.
+/model/*.engine
