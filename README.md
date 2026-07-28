@@ -164,8 +164,10 @@ make -C build -j`nproc`
 | `world_target_tracker.hpp/.cpp` | 维护目标状态，进行观测门限、初始化、预测、更新和失观测滑行。 |
 | `laser_aim.cpp` | 主运行入口：取图、检测、PnP、坐标转换、跟踪、瞄准与可选串口发送。 |
 | `test_laser.cpp` | 相机、ROI 检测与红光定位链路的交互式验证程序。 |
+| `KEYPOINT_CENTER_MODEL.md` | 关键点中心网络的输入、输出和运行说明。 |
+| `laser/README.md` | 激光检测、PnP 尺寸与激光安装参数的补充说明。 |
 
-### `config/` 与 `model/`
+### `config/`、`docs/` 与 `model/`
 
 | 文件 | 作用 |
 | --- | --- |
@@ -194,6 +196,7 @@ make -C build -j`nproc`
 | `test_gimbal_arrival_time.cpp` | 云台运动与到位时间预测。 |
 | `calibrate_laser_boresight.cpp` | 激光光轴标定数据采集与求解。 |
 | `test/CMakeLists.txt` | 上述测试与标定目标的构建定义。 |
+| `test/README.md` | 各离线测试的参数和运行示例。 |
 
 ## 常用测试命令
 
@@ -209,44 +212,67 @@ make -C build -j`nproc`
 
 ## 标定与坐标约定
 
-- 激光光轴标定流程、重要参数和测试用法均见 [`debug.md`](debug.md)。
+- 详细的激光光轴标定流程见 `docs/red_laser_boresight_calibration.md`。
+- 串口字节布局与控制字段见 `docs/serial_protocol.md`。
+- 运动目标的观测时间、预测和云台到位时间设计见 `docs/motion_target_timing.md`。
 - 相机坐标遵循 OpenCV 约定：`+X` 指向图像右侧、`+Y` 指向图像下侧、`+Z` 指向镜头前方。
 - 所有长度统一使用米；配置、模型和标定参数必须对应同一套相机、镜头、目标装置与安装关系。
 
-## 作者
+# 作者
 
-- 费钰涵 [AuroraFYH](https://github.com/AuroraFYH)
+- 费钰涵 [AuroraFYH](https://github.com/AuroraFYH) 
   除模型训练外其他所有部分
 
 - 郝雅蓉
+  数据集制作和模型训练
 
 ---
 
-## 🙏 对本项目有帮助的 RoboMaster 开源项目或者个人
-
-排名不分先后。
-
+## 参考文献
 - 武汉科技大学 崇实 战队
 
   [awakening](https://github.com/WUST-RM/awakening)
 
   [wust_vision](https://github.com/WUST-RM/wust_vision)
 
-- 同济大学 superpower 战队
+- 同济大学 superpower 战队  
 
   [sp_vision_25](https://github.com/TongjiSuperPower/sp_vision_25)
 
-- 华北理工大学 Horizon 战队
+- 华北理工大学 Horizon 战队  
 
   https://github.com/BreCaspian/LaserTracking-2026
 
-- 香港科技大学 ENTERPRIZE 战队
+- 香港科技大学 ENTERPRIZE 战队  
 
   [RM2025-Radar-Algorithm](https://github.com/hkustenterprize/RM2025-Radar-Algorithm)
 
 
+# 🙏 对本项目有帮助的 RoboMaster 开源项目或者个人
+
+排名不分先后。
+
+- 武汉科技大学 崇实 战队
+
+- 文华学院 MSE 战队
+
+(感谢以上两个武汉的兄弟学校为我们提供的各种支持，真正的赞助商，拼拼凑凑又一年)
+
+- 华中科技大学 狼牙 战队
+
+(感谢小狼雷达组为我们提供的部分无人机数据集)
+
+- 东莞理工学院 ACE 战队
+
+(感谢YHanG佬提供的帮助)
+
+- 文华学院 肖晨阳
+
+## 特别感谢
+
+    武汉科技大学 武晓健hy
+    (本人从这个赛季初的菜鸡小登走到现在，hy佬一直在提供帮助，在我还是个啥都不懂的小登的时候很耐心的回答我的问题，在我怀疑自己的时候会鼓励我，在我们经费短缺的时候提供了mid70，恩情还不完)
+
+    Nautilus战队的所有人，因为有大家的努力付出，鹦鹉螺才能走到现在
+
 ---
-
-## License
-
-许可证待补充。在正式公开发布前，请添加 `LICENSE`，并确认代码、模型及训练数据的再分发条件。
