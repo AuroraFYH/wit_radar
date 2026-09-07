@@ -225,7 +225,7 @@ make -C build -j`nproc`
 - 费钰涵 [AuroraFYH](https://github.com/AuroraFYH) 
   除模型训练外其他所有部分
 
-- 郝雅蓉 [AuroraFYH](https://github.com/hyris188)
+- 郝雅蓉 [hyris188](https://github.com/hyris188)
   数据集制作和模型训练
 
 ---
