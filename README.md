@@ -92,6 +92,8 @@ flowchart LR
 - `detector.engine`：本机生成的 TensorRT 引擎路径，默认 `model/best.engine`；
 - `communication.serial`：电控串口参数。
 
+模型放在https://github.com/hyris188/RM-Radar-Vision-Framework
+
 配置内的参数对应当前设备，使用前请务必按自己的设备修改和标定。
 
 ### 2. 配置与编译
@@ -223,7 +225,7 @@ make -C build -j`nproc`
 - 费钰涵 [AuroraFYH](https://github.com/AuroraFYH) 
   除模型训练外其他所有部分
 
-- 郝雅蓉
+- 郝雅蓉 [AuroraFYH](https://github.com/hyris188)
   数据集制作和模型训练
 
 ---
