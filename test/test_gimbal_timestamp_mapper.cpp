@@ -23,6 +23,13 @@ int main() {
             throw std::runtime_error("Device timestamp wrap handling failed.");
         }
 
+        wit_radar::communication::GimbalTimestampMapper drift_mapper;
+        const auto drift_first = drift_mapper.map(1000U, start + 15ms, 5ms);
+        const auto drift_second = drift_mapper.map(70000U, start + 120ms, 5ms);
+        if (drift_first != start + 10ms || drift_second != start + 115ms) {
+            throw std::runtime_error("Device timestamp drift recovery failed.");
+        }
+
         std::cout << "Gimbal timestamp mapper test passed.\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {

@@ -709,13 +709,15 @@ int main(int argc, char* argv[]) {
             if (serial_number.empty()) {
                 throw std::runtime_error("Missing camera.sn in configuration file: " + config_path);
             }
+            const wit_radar::HikCameraSettings camera_settings =
+                wit_radar::read_camera_settings(config_file["camera"]);
             const int wait_key_ms = read_int(config, "camera_wait_key_ms", 1);
             const int log_every_n_frames = std::max(1, read_int(config, "log_every_n_frames", 30));
             const bool save_lost_frames = read_bool(config, "save_lost_frames", true);
             const std::filesystem::path lost_frame_output_directory =
                 read_string(config, "lost_frame_output_dir", "test_output/traditional_center_lost");
             wit_radar::HikCamera camera;
-            camera.open_by_serial_number(serial_number);
+            camera.open_by_serial_number(serial_number, camera_settings);
             std::cout << "Traditional center camera preview started. Press Esc or q to exit.\n";
             std::uint64_t frame_number = 0;
             std::uint64_t success_streak = 0;

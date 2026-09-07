@@ -128,6 +128,43 @@ int main() {
         }
         std::cout << "Global cylinder PnP synthetic test: target=" << global_target
                   << " reprojection_error=" << global_result.average_reprojection_error_px << " px\n";
+
+        cv::Mat unbalanced_global_image(1024, 1280, CV_8UC3, cv::Scalar::all(0));
+        for (const int index : {1, 2, 3}) {
+            const double theta = 2.0 * pi * index / 8.0;
+            draw_global_marker(unbalanced_global_image, global_camera_matrix, radius, theta,
+                               separation * 0.5, global_rotation, global_translation);
+        }
+        for (const int index : {2, 3}) {
+            const double theta = 2.0 * pi * index / 8.0;
+            draw_global_marker(unbalanced_global_image, global_camera_matrix, radius, theta,
+                               -separation * 0.5, global_rotation, global_translation);
+        }
+        const wit_radar::CylinderPoseResult unbalanced_global_result =
+            wit_radar::CylinderPoseSolver(global_parameters).solve(unbalanced_global_image);
+        if (!unbalanced_global_result.target_center_in_camera_m.has_value()) {
+            throw std::runtime_error("Unbalanced global cylinder PnP failed: " +
+                                     unbalanced_global_result.reason);
+        }
+        if (unbalanced_global_result.upper_marker_set_count != 3 ||
+            unbalanced_global_result.lower_marker_set_count != 2 ||
+            unbalanced_global_result.markers.size() != 4U) {
+            throw std::runtime_error("Unbalanced global cylinder PnP did not use a balanced subset.");
+        }
+        const cv::Point3d unbalanced_global_target =
+            unbalanced_global_result.target_center_in_camera_m.value();
+        if (!close_to(unbalanced_global_target.x, global_translation[0], 0.05) ||
+            !close_to(unbalanced_global_target.y, global_translation[1], 0.05) ||
+            !close_to(unbalanced_global_target.z, global_translation[2], 0.08)) {
+            throw std::runtime_error("Unbalanced global cylinder PnP returned an unexpected center: " +
+                                     cv::format("(%.6f, %.6f, %.6f)", unbalanced_global_target.x,
+                                                unbalanced_global_target.y, unbalanced_global_target.z));
+        }
+        std::cout << "Unbalanced global cylinder PnP synthetic test: target="
+                  << unbalanced_global_target
+                  << " reprojection_error=" << unbalanced_global_result.average_reprojection_error_px
+                  << " px hypotheses=" << unbalanced_global_result.global_cylinder_hypothesis_count
+                  << '\n';
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {
         std::cerr << "Cylinder PnP synthetic test failed: " << error.what() << '\n';

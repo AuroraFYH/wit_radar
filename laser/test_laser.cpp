@@ -119,6 +119,8 @@ int main(int argc, char* argv[]) {
         if (serial_number.empty()) {
             throw std::runtime_error("Missing camera.sn in configuration file: " + config_path);
         }
+        const wit_radar::HikCameraSettings camera_settings =
+            wit_radar::read_camera_settings(config["camera"]);
         const std::string engine_path = read_required_string(config["detector"], "engine", config_path);
         const float confidence_threshold = read_float(config["detector"], "confidence_threshold", 0.25F);
         const float nms_threshold = read_float(config["detector"], "nms_threshold", 0.45F);
@@ -134,7 +136,7 @@ int main(int argc, char* argv[]) {
                                           min_content_overlap, debug_logging, debug_every_n_frames,
                                           device_center_parameters);
         wit_radar::HikCamera camera;
-        camera.open_by_serial_number(serial_number);
+        camera.open_by_serial_number(serial_number, camera_settings);
 
         const std::string preview_window = "Laser Detection";
         const std::string roi_window = "Laser ROI";

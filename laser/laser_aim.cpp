@@ -286,13 +286,19 @@ void draw_pnp_input_rectangle(cv::Mat& image, const cv::RotatedRect& rectangle, 
 
 int main(int argc, char* argv[]) {
     try {
-        if (argc > 3) {
-            throw std::runtime_error("Usage: laser_aim [config_path] [--send]");
-        }
-        const std::string config_path = argc > 1 ? argv[1] : "config/laser.json";
-        const bool send_commands = argc == 3 && std::string(argv[2]) == "--send";
-        if (argc == 3 && !send_commands) {
-            throw std::runtime_error("Usage: laser_aim [config_path] [--send]");
+        bool send_commands = false;
+        std::string config_path = "config/laser.json";
+        bool config_path_set = false;
+        for (int argument_index = 1; argument_index < argc; ++argument_index) {
+            const std::string argument = argv[argument_index];
+            if (argument == "--send") {
+                send_commands = true;
+            } else if (!config_path_set) {
+                config_path = argument;
+                config_path_set = true;
+            } else {
+                throw std::runtime_error("Usage: laser_aim [config_path] [--send]");
+            }
         }
 
         cv::FileStorage config(config_path, cv::FileStorage::READ);
@@ -318,6 +324,8 @@ int main(int argc, char* argv[]) {
         if (serial_number.empty()) {
             throw std::runtime_error("Missing camera.sn in configuration file: " + config_path);
         }
+        const wit_radar::HikCameraSettings camera_settings =
+            wit_radar::read_camera_settings(camera_config);
         const int image_width = read_int(camera_config, "image_width", 0);
         const int image_height = read_int(camera_config, "image_height", 0);
         const cv::Matx33d camera_matrix = read_matrix(camera_config, "camera_matrix");
@@ -370,6 +378,11 @@ int main(int argc, char* argv[]) {
         if (!std::isfinite(world_yaw_feedback_sign) || !std::isfinite(world_pitch_feedback_sign) ||
             std::abs(world_yaw_feedback_sign) < 1e-6 || std::abs(world_pitch_feedback_sign) < 1e-6) {
             throw std::runtime_error("aim world feedback signs must be finite and non-zero.");
+        }
+        const double command_yaw_offset_deg = read_double(aim_config, "command_yaw_offset_deg", 0.0);
+        const double command_pitch_offset_deg = read_double(aim_config, "command_pitch_offset_deg", 0.0);
+        if (!std::isfinite(command_yaw_offset_deg) || !std::isfinite(command_pitch_offset_deg)) {
+            throw std::runtime_error("aim command offsets must be finite.");
         }
         wit_radar::StaticAimCompensationParameters static_compensation_parameters;
         const cv::FileNode static_compensation_config = aim_config["static_compensation"];
@@ -482,6 +495,8 @@ int main(int argc, char* argv[]) {
             read_int(tracking_config, "state_interpolation_max_gap_ms", 30);
         const int state_nearest_max_offset_ms =
             read_int(tracking_config, "state_nearest_max_offset_ms", 15);
+        const bool use_latest_gimbal_state_for_frame =
+            read_bool(tracking_config, "use_latest_gimbal_state_for_frame", false);
         if (tracker_control_latency_ms < 0 || camera_frame_latency_ms < 0 ||
             gimbal_state_receive_latency_ms < 0 || state_interpolation_max_gap_ms < 0 ||
             state_nearest_max_offset_ms < 0) {
@@ -575,10 +590,11 @@ int main(int argc, char* argv[]) {
                       << " timestamp_ms=" << state.device_timestamp_ms << '\n';
         });
         wit_radar::HikCamera camera;
-        camera.open_by_serial_number(serial_number);
+        camera.open_by_serial_number(serial_number, camera_settings);
 
         const std::string window_name = "Laser Aim";
         cv::namedWindow(window_name, cv::WINDOW_NORMAL);
+        cv::resizeWindow(window_name, 960, 640);
         std::cout << "Laser aim started in " << (send_commands ? "SEND" : "PREVIEW")
                   << " mode. Press Esc or q to exit.\n";
         std::cout << "[laser-aim] Beam model: "
@@ -595,7 +611,8 @@ int main(int argc, char* argv[]) {
                       << tracker_parameters.innovation_gate_chi2 << ", actuation latency="
                       << tracker_control_latency_ms << " ms, frame latency="
                       << camera_frame_latency_ms << " ms, state receive latency="
-                      << gimbal_state_receive_latency_ms << " ms\n";
+                      << gimbal_state_receive_latency_ms << " ms, frame-state="
+                      << (use_latest_gimbal_state_for_frame ? "latest 0x02" : "timestamp lookup") << '\n';
         }
         if (gimbal_motion_parameters.enabled) {
             std::cout << "[laser-aim] Gimbal motion prediction enabled: yaw=("
@@ -616,6 +633,11 @@ int main(int argc, char* argv[]) {
                       << static_compensation_parameters.pitch_constant_deg << " deg, range=["
                       << static_compensation_parameters.range_min_m << ','
                       << static_compensation_parameters.range_max_m << "]m\n";
+        }
+        if (command_yaw_offset_deg != 0.0 || command_pitch_offset_deg != 0.0) {
+            std::cout << "[laser-aim] Command offset enabled: yaw="
+                      << command_yaw_offset_deg << " deg, pitch="
+                      << command_pitch_offset_deg << " deg\n";
         }
 
         auto next_send_time = std::chrono::steady_clock::now();
@@ -651,16 +673,28 @@ int main(int argc, char* argv[]) {
             if (!frame.empty()) {
                 const auto frame_timestamp = camera_frame.received_at -
                                              std::chrono::milliseconds(camera_frame_latency_ms);
-                const std::optional<wit_radar::communication::GimbalStateLookup> frame_state =
-                    communicator.state_at(frame_timestamp,
-                                          std::chrono::milliseconds(state_interpolation_max_gap_ms),
-                                          std::chrono::milliseconds(state_nearest_max_offset_ms));
                 const std::optional<wit_radar::communication::GimbalState> control_state =
                     communicator.latest_state();
                 const bool control_state_fresh =
                     control_state.has_value() &&
                     camera_frame.received_at - control_state->received_at <=
                         std::chrono::milliseconds(state_timeout_ms);
+                std::optional<wit_radar::communication::GimbalStateLookup> frame_state;
+                if (use_latest_gimbal_state_for_frame) {
+                    if (control_state.has_value() && control_state_fresh) {
+                        frame_state = wit_radar::communication::GimbalStateLookup{
+                            control_state->angles,
+                            false,
+                            control_state->sampled_at,
+                            std::chrono::duration<double, std::milli>(
+                                control_state->sampled_at - frame_timestamp)
+                                .count()};
+                    }
+                } else {
+                    frame_state = communicator.state_at(frame_timestamp,
+                                                        std::chrono::milliseconds(state_interpolation_max_gap_ms),
+                                                        std::chrono::milliseconds(state_nearest_max_offset_ms));
+                }
                 if (tracker_parameters.enabled) {
                     world_target_tracker.coast_to(frame_timestamp);
                 }
@@ -861,6 +895,8 @@ int main(int argc, char* argv[]) {
                                     candidate.command.pitch += static_cast<float>(
                                         candidate.static_compensation.pitch_correction_deg);
                                 }
+                                candidate.command.yaw += static_cast<float>(command_yaw_offset_deg);
+                                candidate.command.pitch += static_cast<float>(command_pitch_offset_deg);
                                 return candidate;
                             };
                             double prediction_seconds = base_prediction_seconds;
@@ -1029,8 +1065,10 @@ int main(int argc, char* argv[]) {
                                                                           roi_pose_parameters),
                                                      detection.roi.tl(), cv::Scalar(0, 255, 0),
                                                      "EKF center");
+                                const bool interval_ready = command_timestamp >= next_send_time;
+                                bool command_sent_or_queued = false;
                                 if (send_commands && control_state_fresh && correction_safe &&
-                                    command_angles_valid && command_timestamp >= next_send_time) {
+                                    command_angles_valid && interval_ready) {
                                     const bool command_queued = communicator.send_command(
                                         command, [&output_mutex](const boost::system::error_code& error,
                                                                   std::size_t bytes_written) {
@@ -1044,6 +1082,7 @@ int main(int argc, char* argv[]) {
                                             }
                                         });
                                     if (command_queued) {
+                                        command_sent_or_queued = true;
                                         std::lock_guard<std::mutex> lock(output_mutex);
                                         std::cout << "[COMM][TX] 0x01 yaw=" << command.yaw
                                                   << " pitch=" << command.pitch << " queued speed=("
@@ -1065,6 +1104,22 @@ int main(int argc, char* argv[]) {
                                 if (!correction_safe) {
                                     status += " correction too large";
                                 }
+                                if (send_commands && frame_number %
+                                                         static_cast<std::uint64_t>(debug_log_every_n_frames) == 0 &&
+                                    (!control_state_fresh || !correction_safe || !command_angles_valid ||
+                                     !interval_ready) &&
+                                    !command_sent_or_queued) {
+                                    std::lock_guard<std::mutex> lock(output_mutex);
+                                    std::cerr << "[COMM][TX] blocked:"
+                                              << " state_fresh=" << (control_state_fresh ? "yes" : "no")
+                                              << " correction_safe=" << (correction_safe ? "yes" : "no")
+                                              << " command_valid=" << (command_angles_valid ? "yes" : "no")
+                                              << " interval_ready="
+                                              << (interval_ready ? "yes" : "no")
+                                              << " yaw_delta=" << correction.target_yaw
+                                              << " pitch_delta=" << correction.target_pitch
+                                              << " command=(" << command.yaw << ',' << command.pitch << ")\n";
+                                }
                             } else {
                                 status = cv::format("EKF initializing (%d/%d)",
                                                     tracker_result.initialization_sample_count,
@@ -1072,7 +1127,19 @@ int main(int argc, char* argv[]) {
                             }
                             }
                         } else if (control_state.has_value() && control_state_fresh) {
-                            status = "waiting for frame-time 0x02";
+                            const double latest_sample_offset_ms = std::chrono::duration<double, std::milli>(
+                                                                       control_state->sampled_at - frame_timestamp)
+                                                                       .count();
+                            const double latest_receive_offset_ms = std::chrono::duration<double, std::milli>(
+                                                                        control_state->received_at - frame_timestamp)
+                                                                        .count();
+                            const double latest_receive_age_ms = std::chrono::duration<double, std::milli>(
+                                                                     camera_frame.received_at -
+                                                                     control_state->received_at)
+                                                                     .count();
+                            status = cv::format(
+                                "waiting for frame-time 0x02 sample_offset=%.1fms rx_offset=%.1fms rx_age=%.1fms",
+                                latest_sample_offset_ms, latest_receive_offset_ms, latest_receive_age_ms);
                         } else if (control_state.has_value()) {
                             status = "waiting for fresh 0x02";
                         } else {

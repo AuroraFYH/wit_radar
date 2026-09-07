@@ -44,6 +44,29 @@ void check_cuda(cudaError_t result, const char* operation) {
     }
 }
 
+std::string cuda_error_details(cudaError_t result) {
+    const char* name = cudaGetErrorName(result);
+    const char* description = cudaGetErrorString(result);
+    std::ostringstream message;
+    message << (name != nullptr ? name : "unknown CUDA error") << " ("
+            << (description != nullptr ? description : "no description") << ')';
+    return message.str();
+}
+
+void check_cuda_runtime_available() {
+    int device_count = 0;
+    const cudaError_t device_count_result = cudaGetDeviceCount(&device_count);
+    if (device_count_result != cudaSuccess) {
+        throw make_error("CUDA is not available: cudaGetDeviceCount failed with " +
+                         cuda_error_details(device_count_result) +
+                         ". Verify that the NVIDIA driver is loaded and /dev/nvidia* device nodes exist.");
+    }
+    if (device_count <= 0) {
+        throw make_error("CUDA is not available: no NVIDIA CUDA device was found.");
+    }
+    check_cuda(cudaSetDevice(0), "cudaSetDevice(0)");
+}
+
 std::size_t volume(const nvinfer1::Dims& shape) {
     std::size_t result = 1;
     for (int index = 0; index < shape.nbDims; ++index) {
@@ -198,6 +221,7 @@ public:
             throw make_error("unable to read engine file: " + engine_path);
         }
 
+        check_cuda_runtime_available();
         runtime_.reset(nvinfer1::createInferRuntime(trt_logger));
         if (!runtime_) {
             throw make_error("failed to create TensorRT runtime.");

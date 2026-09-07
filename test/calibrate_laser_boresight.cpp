@@ -23,6 +23,7 @@ namespace {
 
 struct CalibrationSettings {
     std::string camera_serial_number;
+    wit_radar::HikCameraSettings camera_settings;
     int image_width = 0;
     int image_height = 0;
     cv::Matx33d camera_matrix = cv::Matx33d::eye();
@@ -111,6 +112,7 @@ CalibrationSettings load_settings(const std::string& config_path) {
     if (settings.camera_serial_number.empty()) {
         throw std::runtime_error("Missing camera.sn in configuration file.");
     }
+    settings.camera_settings = wit_radar::read_camera_settings(camera);
     settings.image_width = read_int(camera, "image_width", 0);
     settings.image_height = read_int(camera, "image_height", 0);
     settings.camera_matrix = read_matrix(camera, "camera_matrix");
@@ -392,7 +394,7 @@ int main(int argc, char* argv[]) {
         const std::vector<cv::Point3f> object_points = make_chessboard_object_points(processing_settings);
 
         wit_radar::HikCamera camera;
-        camera.open_by_serial_number(settings.camera_serial_number);
+        camera.open_by_serial_number(settings.camera_serial_number, settings.camera_settings);
         const std::string window_name = "Red Laser Boresight Calibration";
         cv::namedWindow(window_name, cv::WINDOW_NORMAL);
         std::vector<cv::Point3d> samples;

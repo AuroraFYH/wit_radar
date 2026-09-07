@@ -3,11 +3,21 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 
 #include <opencv2/core/mat.hpp>
 
+namespace cv {
+class FileNode;
+}
+
 namespace wit_radar {
+
+struct HikCameraSettings {
+    std::optional<double> gain_db;
+    std::optional<double> exposure_time_us;
+};
 
 struct HikCameraFrame {
     cv::Mat image;
@@ -27,20 +37,23 @@ public:
     HikCamera(HikCamera&&) = delete;
     HikCamera& operator=(HikCamera&&) = delete;
 
-    void open(std::size_t device_index = 0);
-    void open_by_serial_number(const std::string& serial_number);
+    void open(std::size_t device_index = 0, const HikCameraSettings& settings = {});
+    void open_by_serial_number(const std::string& serial_number,
+                               const HikCameraSettings& settings = {});
     void close() noexcept;
     bool is_open() const noexcept;
     cv::Mat read(unsigned int timeout_ms = 1000);
     HikCameraFrame read_frame(unsigned int timeout_ms = 1000);
 
 private:
-    void open_device(void* device_info);
+    void open_device(void* device_info, const HikCameraSettings& settings);
 
     void* handle_ = nullptr;
     bool opened_ = false;
     bool grabbing_ = false;
     bool sdk_initialized_ = false;
 };
+
+HikCameraSettings read_camera_settings(const cv::FileNode& camera_config);
 
 }  // namespace wit_radar

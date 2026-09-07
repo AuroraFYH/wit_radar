@@ -54,6 +54,38 @@ struct GlobalCylinderPose {
     double average_reprojection_error_px = 0.0;
 };
 
+std::vector<std::vector<int>> observation_index_combinations(int observation_count, int selected_count) {
+    std::vector<std::vector<int>> combinations;
+    if (selected_count <= 0 || observation_count < selected_count) {
+        return combinations;
+    }
+    std::vector<int> current;
+    const auto enumerate = [&](const auto& self, int next_index) -> void {
+        if (static_cast<int>(current.size()) == selected_count) {
+            combinations.push_back(current);
+            return;
+        }
+        const int remaining_needed = selected_count - static_cast<int>(current.size());
+        for (int index = next_index; index <= observation_count - remaining_needed; ++index) {
+            current.push_back(index);
+            self(self, index + 1);
+            current.pop_back();
+        }
+    };
+    enumerate(enumerate, 0);
+    return combinations;
+}
+
+std::vector<GlobalCylinderObservation> select_observations(
+    const std::vector<GlobalCylinderObservation>& observations, const std::vector<int>& indices) {
+    std::vector<GlobalCylinderObservation> selected;
+    selected.reserve(indices.size());
+    for (const int index : indices) {
+        selected.push_back(observations[static_cast<std::size_t>(index)]);
+    }
+    return selected;
+}
+
 bool finite_value(double value) {
     return std::isfinite(value);
 }
@@ -218,8 +250,7 @@ std::optional<GlobalCylinderPose> solve_global_cylinder_pose(
     std::vector<GlobalCylinderObservation> lower_observations, const CylinderPoseParameters& parameters,
     int* hypothesis_count) {
     *hypothesis_count = 0;
-    if (upper_observations.size() != lower_observations.size() || upper_observations.size() < 2 ||
-        parameters.markers_per_ring < static_cast<int>(upper_observations.size())) {
+    if (upper_observations.size() < 2 || lower_observations.size() < 2 || parameters.markers_per_ring < 2) {
         return std::nullopt;
     }
     std::sort(upper_observations.begin(), upper_observations.end(),
@@ -232,7 +263,6 @@ std::optional<GlobalCylinderPose> solve_global_cylinder_pose(
               });
 
     constexpr double pi = 3.14159265358979323846;
-    const int visible_per_ring = static_cast<int>(upper_observations.size());
     const double half_separation = parameters.ring_center_separation_m * 0.5;
     const double lower_alignment = parameters.ring_alignment_deg * pi / 180.0;
     const cv::Mat camera_matrix = make_camera_matrix(parameters);
@@ -240,115 +270,140 @@ std::optional<GlobalCylinderPose> solve_global_cylinder_pose(
     std::optional<GlobalCylinderPose> best_pose;
     double best_error = std::numeric_limits<double>::infinity();
 
-    for (int start_index = 0; start_index < parameters.markers_per_ring; ++start_index) {
-        for (const int direction : {-1, 1}) {
-            std::vector<cv::Point3f> object_points;
-            std::vector<cv::Point2f> image_points;
-            std::vector<GlobalCylinderObservation> observations;
-            std::vector<cv::Point3d> object_points_double;
-            std::vector<std::array<cv::Point3d, 4>> marker_corners;
-            object_points.reserve(visible_per_ring * 2);
-            image_points.reserve(visible_per_ring * 2);
-            observations.reserve(visible_per_ring * 2);
-            object_points_double.reserve(visible_per_ring * 2);
-            marker_corners.reserve(visible_per_ring * 2);
-            for (int ring_point = 0; ring_point < visible_per_ring; ++ring_point) {
-                const int index = (start_index + direction * ring_point + parameters.markers_per_ring) %
-                                  parameters.markers_per_ring;
-                const double upper_theta = 2.0 * pi * index / parameters.markers_per_ring;
-                const double lower_theta = upper_theta + lower_alignment;
-                const cv::Point3d upper_point{parameters.emitting_face_radius_m * std::cos(upper_theta),
-                                              parameters.emitting_face_radius_m * std::sin(upper_theta),
-                                              half_separation};
-                const cv::Point3d lower_point{parameters.emitting_face_radius_m * std::cos(lower_theta),
-                                              parameters.emitting_face_radius_m * std::sin(lower_theta),
-                                              -half_separation};
-                object_points.emplace_back(static_cast<float>(upper_point.x), static_cast<float>(upper_point.y),
-                                           static_cast<float>(upper_point.z));
-                image_points.push_back(upper_observations[ring_point].image_center);
-                observations.push_back(upper_observations[ring_point]);
-                object_points_double.push_back(upper_point);
-                marker_corners.push_back(marker_corners_in_cylinder(upper_point, upper_theta, parameters));
-                object_points.emplace_back(static_cast<float>(lower_point.x), static_cast<float>(lower_point.y),
-                                           static_cast<float>(lower_point.z));
-                image_points.push_back(lower_observations[ring_point].image_center);
-                observations.push_back(lower_observations[ring_point]);
-                object_points_double.push_back(lower_point);
-                marker_corners.push_back(marker_corners_in_cylinder(lower_point, lower_theta, parameters));
-            }
+    const int maximum_visible_per_ring =
+        std::min({parameters.markers_per_ring, static_cast<int>(upper_observations.size()),
+                  static_cast<int>(lower_observations.size())});
+    for (int visible_per_ring = maximum_visible_per_ring; visible_per_ring >= 2; --visible_per_ring) {
+        const std::vector<std::vector<int>> upper_combinations =
+            observation_index_combinations(static_cast<int>(upper_observations.size()), visible_per_ring);
+        const std::vector<std::vector<int>> lower_combinations =
+            observation_index_combinations(static_cast<int>(lower_observations.size()), visible_per_ring);
+        for (const std::vector<int>& upper_indices : upper_combinations) {
+            const std::vector<GlobalCylinderObservation> selected_upper =
+                select_observations(upper_observations, upper_indices);
+            for (const std::vector<int>& lower_indices : lower_combinations) {
+                const std::vector<GlobalCylinderObservation> selected_lower =
+                    select_observations(lower_observations, lower_indices);
+                for (int start_index = 0; start_index < parameters.markers_per_ring; ++start_index) {
+                    for (const int direction : {-1, 1}) {
+                        std::vector<cv::Point3f> object_points;
+                        std::vector<cv::Point2f> image_points;
+                        std::vector<GlobalCylinderObservation> observations;
+                        std::vector<cv::Point3d> object_points_double;
+                        std::vector<std::array<cv::Point3d, 4>> marker_corners;
+                        object_points.reserve(visible_per_ring * 2);
+                        image_points.reserve(visible_per_ring * 2);
+                        observations.reserve(visible_per_ring * 2);
+                        object_points_double.reserve(visible_per_ring * 2);
+                        marker_corners.reserve(visible_per_ring * 2);
+                        for (int ring_point = 0; ring_point < visible_per_ring; ++ring_point) {
+                            const int index =
+                                (start_index + direction * ring_point + parameters.markers_per_ring) %
+                                parameters.markers_per_ring;
+                            const double upper_theta = 2.0 * pi * index / parameters.markers_per_ring;
+                            const double lower_theta = upper_theta + lower_alignment;
+                            const cv::Point3d upper_point{
+                                parameters.emitting_face_radius_m * std::cos(upper_theta),
+                                parameters.emitting_face_radius_m * std::sin(upper_theta), half_separation};
+                            const cv::Point3d lower_point{
+                                parameters.emitting_face_radius_m * std::cos(lower_theta),
+                                parameters.emitting_face_radius_m * std::sin(lower_theta), -half_separation};
+                            object_points.emplace_back(static_cast<float>(upper_point.x),
+                                                       static_cast<float>(upper_point.y),
+                                                       static_cast<float>(upper_point.z));
+                            image_points.push_back(selected_upper[static_cast<std::size_t>(ring_point)].image_center);
+                            observations.push_back(selected_upper[static_cast<std::size_t>(ring_point)]);
+                            object_points_double.push_back(upper_point);
+                            marker_corners.push_back(marker_corners_in_cylinder(upper_point, upper_theta,
+                                                                                 parameters));
+                            object_points.emplace_back(static_cast<float>(lower_point.x),
+                                                       static_cast<float>(lower_point.y),
+                                                       static_cast<float>(lower_point.z));
+                            image_points.push_back(selected_lower[static_cast<std::size_t>(ring_point)].image_center);
+                            observations.push_back(selected_lower[static_cast<std::size_t>(ring_point)]);
+                            object_points_double.push_back(lower_point);
+                            marker_corners.push_back(marker_corners_in_cylinder(lower_point, lower_theta,
+                                                                                 parameters));
+                        }
 
-            cv::Mat rotation_vector;
-            cv::Mat translation_vector;
-            if (!cv::solvePnP(object_points, image_points, camera_matrix, distortion, rotation_vector,
-                              translation_vector, false, cv::SOLVEPNP_EPNP)) {
-                continue;
-            }
-            cv::solvePnP(object_points, image_points, camera_matrix, distortion, rotation_vector,
-                         translation_vector, true, cv::SOLVEPNP_ITERATIVE);
-            if (!refine_global_pose_with_marker_corners(observations, marker_corners, camera_matrix, distortion,
-                                                        rotation_vector, translation_vector)) {
-                continue;
-            }
-            const cv::Point3d target_center = mat_to_point(translation_vector);
-            if (!finite_point(target_center) || target_center.z <= 0.0) {
-                continue;
-            }
-            ++*hypothesis_count;
-            const double average_error = corner_reprojection_error(
-                observations, marker_corners, camera_matrix, distortion, rotation_vector, translation_vector);
-            if (average_error >= best_error) {
-                continue;
-            }
+                        cv::Mat rotation_vector;
+                        cv::Mat translation_vector;
+                        if (!cv::solvePnP(object_points, image_points, camera_matrix, distortion,
+                                          rotation_vector, translation_vector, false, cv::SOLVEPNP_EPNP)) {
+                            continue;
+                        }
+                        cv::solvePnP(object_points, image_points, camera_matrix, distortion, rotation_vector,
+                                     translation_vector, true, cv::SOLVEPNP_ITERATIVE);
+                        if (!refine_global_pose_with_marker_corners(observations, marker_corners, camera_matrix,
+                                                                    distortion, rotation_vector,
+                                                                    translation_vector)) {
+                            continue;
+                        }
+                        const cv::Point3d target_center = mat_to_point(translation_vector);
+                        if (!finite_point(target_center) || target_center.z <= 0.0) {
+                            continue;
+                        }
+                        ++*hypothesis_count;
+                        const double average_error =
+                            corner_reprojection_error(observations, marker_corners, camera_matrix, distortion,
+                                                      rotation_vector, translation_vector);
+                        if (average_error >= best_error) {
+                            continue;
+                        }
 
-            cv::Mat rotation_matrix;
-            cv::Rodrigues(rotation_vector, rotation_matrix);
-            GlobalCylinderPose pose;
-            pose.target_center_in_camera_m = target_center;
-            pose.upper_axis_point_in_camera_m =
-                rotate_point(rotation_matrix, {0.0, 0.0, half_separation}) + target_center;
-            pose.lower_axis_point_in_camera_m =
-                rotate_point(rotation_matrix, {0.0, 0.0, -half_separation}) + target_center;
-            pose.average_reprojection_error_px = average_error;
-            pose.markers.reserve(observations.size());
-            for (std::size_t point_index = 0; point_index < observations.size(); ++point_index) {
-                const cv::Point3d point_in_camera =
-                    rotate_point(rotation_matrix, object_points_double[point_index]) + target_center;
-                const double theta = std::atan2(object_points_double[point_index].y,
-                                                object_points_double[point_index].x);
-                const cv::Point3d normal_in_camera =
-                    rotate_point(rotation_matrix, {std::cos(theta), std::sin(theta), 0.0});
-                std::array<cv::Point2f, 4> corners{};
-                observations[point_index].rectangle.points(corners.data());
-                MarkerPose marker;
-                marker.corners.assign(corners.begin(), corners.end());
-                marker.center_in_camera_m = point_in_camera;
-                marker.outward_normal_in_camera = normal_in_camera;
-                marker.axis_point_in_camera_m = observations[point_index].upper_ring
-                                                    ? pose.upper_axis_point_in_camera_m
-                                                    : pose.lower_axis_point_in_camera_m;
-                std::vector<cv::Point2d> projected_marker;
-                cv::projectPoints(std::vector<cv::Point3d>(marker_corners[point_index].begin(),
-                                                            marker_corners[point_index].end()),
-                                  rotation_vector, translation_vector, camera_matrix, distortion,
-                                  projected_marker);
-                std::array<cv::Point2f, 4> projected_corners{};
-                for (int corner_index = 0; corner_index < 4; ++corner_index) {
-                    projected_corners[corner_index] = {
-                        static_cast<float>(projected_marker[corner_index].x),
-                        static_cast<float>(projected_marker[corner_index].y)};
+                        cv::Mat rotation_matrix;
+                        cv::Rodrigues(rotation_vector, rotation_matrix);
+                        GlobalCylinderPose pose;
+                        pose.target_center_in_camera_m = target_center;
+                        pose.upper_axis_point_in_camera_m =
+                            rotate_point(rotation_matrix, {0.0, 0.0, half_separation}) + target_center;
+                        pose.lower_axis_point_in_camera_m =
+                            rotate_point(rotation_matrix, {0.0, 0.0, -half_separation}) + target_center;
+                        pose.average_reprojection_error_px = average_error;
+                        pose.markers.reserve(observations.size());
+                        for (std::size_t point_index = 0; point_index < observations.size(); ++point_index) {
+                            const cv::Point3d point_in_camera =
+                                rotate_point(rotation_matrix, object_points_double[point_index]) + target_center;
+                            const double theta = std::atan2(object_points_double[point_index].y,
+                                                            object_points_double[point_index].x);
+                            const cv::Point3d normal_in_camera =
+                                rotate_point(rotation_matrix, {std::cos(theta), std::sin(theta), 0.0});
+                            std::array<cv::Point2f, 4> corners{};
+                            observations[point_index].rectangle.points(corners.data());
+                            MarkerPose marker;
+                            marker.corners.assign(corners.begin(), corners.end());
+                            marker.center_in_camera_m = point_in_camera;
+                            marker.outward_normal_in_camera = normal_in_camera;
+                            marker.axis_point_in_camera_m = observations[point_index].upper_ring
+                                                                ? pose.upper_axis_point_in_camera_m
+                                                                : pose.lower_axis_point_in_camera_m;
+                            std::vector<cv::Point2d> projected_marker;
+                            cv::projectPoints(std::vector<cv::Point3d>(marker_corners[point_index].begin(),
+                                                                        marker_corners[point_index].end()),
+                                              rotation_vector, translation_vector, camera_matrix, distortion,
+                                              projected_marker);
+                            std::array<cv::Point2f, 4> projected_corners{};
+                            for (int corner_index = 0; corner_index < 4; ++corner_index) {
+                                projected_corners[corner_index] = {
+                                    static_cast<float>(projected_marker[corner_index].x),
+                                    static_cast<float>(projected_marker[corner_index].y)};
+                            }
+                            const std::array<cv::Point2f, 4> matched_corners =
+                                best_corner_order(corners, projected_corners);
+                            double marker_error = 0.0;
+                            for (int corner_index = 0; corner_index < 4; ++corner_index) {
+                                marker_error +=
+                                    cv::norm(projected_corners[corner_index] - matched_corners[corner_index]);
+                            }
+                            marker.reprojection_error_px = marker_error * 0.25;
+                            marker.upper_ring = observations[point_index].upper_ring;
+                            pose.markers.push_back(std::move(marker));
+                        }
+                        best_error = average_error;
+                        best_pose = std::move(pose);
+                    }
                 }
-                const std::array<cv::Point2f, 4> matched_corners =
-                    best_corner_order(corners, projected_corners);
-                double marker_error = 0.0;
-                for (int corner_index = 0; corner_index < 4; ++corner_index) {
-                    marker_error += cv::norm(projected_corners[corner_index] - matched_corners[corner_index]);
-                }
-                marker.reprojection_error_px = marker_error * 0.25;
-                marker.upper_ring = observations[point_index].upper_ring;
-                pose.markers.push_back(std::move(marker));
             }
-            best_error = average_error;
-            best_pose = std::move(pose);
         }
     }
     return best_pose;

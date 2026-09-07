@@ -10,7 +10,7 @@
 
 int main(int argc, char* argv[]) {
     try {
-        const std::string config_path = argc > 1 ? argv[1] : "test/test.yaml";
+        const std::string config_path = argc > 1 ? argv[1] : "config/test.json";
         cv::FileStorage config(config_path, cv::FileStorage::READ);
         if (!config.isOpened()) {
             throw std::runtime_error("Unable to open configuration file: " + config_path);
@@ -21,9 +21,11 @@ int main(int argc, char* argv[]) {
         if (serial_number.empty()) {
             throw std::runtime_error("Missing camera.sn in configuration file: " + config_path);
         }
+        const wit_radar::HikCameraSettings camera_settings =
+            wit_radar::read_camera_settings(config["camera"]);
 
         wit_radar::HikCamera camera;
-        camera.open_by_serial_number(serial_number);
+        camera.open_by_serial_number(serial_number, camera_settings);
 
         const std::string window_name = "Hikvision Camera Preview";
         cv::namedWindow(window_name, cv::WINDOW_NORMAL);

@@ -7,6 +7,10 @@
 /MvSdkLog/
 *.log
 
+# Local build and camera SDK caches
+/.xmake/
+/$(ALLUSERSPROFILE)/
+
 # Local scratch log captured during development
 /无标题文档 1
 

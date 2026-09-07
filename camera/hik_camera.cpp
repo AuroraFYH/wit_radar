@@ -1,9 +1,13 @@
 #include "hik_camera.hpp"
 
+#include <algorithm>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
+
+#include <opencv2/core.hpp>
 
 #include "MvCameraControl.h"
 
@@ -74,6 +78,28 @@ std::string serial_number(const MV_CC_DEVICE_INFO& device) {
     }
 }
 
+void set_float_value(void* handle, const char* key, double value) {
+    MVCC_FLOATVALUE range{};
+    const int range_result = MV_CC_GetFloatValue(handle, key, &range);
+    if (range_result != MV_OK) {
+        throw make_sdk_error(key, range_result);
+    }
+
+    const double clamped = std::clamp(value, static_cast<double>(range.fMin),
+                                      static_cast<double>(range.fMax));
+    const int set_result = MV_CC_SetFloatValue(handle, key, static_cast<float>(clamped));
+    if (set_result != MV_OK) {
+        throw make_sdk_error(key, set_result);
+    }
+}
+
+void set_enum_value_by_string(void* handle, const char* key, const char* value) {
+    const int result = MV_CC_SetEnumValueByString(handle, key, value);
+    if (result != MV_OK) {
+        throw make_sdk_error(key, result);
+    }
+}
+
 MV_CC_DEVICE_INFO_LIST enumerate_devices() {
     MV_CC_DEVICE_INFO_LIST devices{};
     constexpr unsigned int transport_layers =
@@ -93,7 +119,32 @@ HikCamera::~HikCamera() {
     close();
 }
 
-void HikCamera::open(std::size_t device_index) {
+HikCameraSettings read_camera_settings(const cv::FileNode& camera_config) {
+    HikCameraSettings settings;
+    if (camera_config.empty()) {
+        return settings;
+    }
+
+    const cv::FileNode gain = camera_config["gain_db"];
+    if (!gain.empty()) {
+        const double value = gain.real();
+        if (value >= 0.0) {
+            settings.gain_db = value;
+        }
+    }
+
+    const cv::FileNode exposure = camera_config["exposure_time_us"];
+    if (!exposure.empty()) {
+        const double value = exposure.real();
+        if (value > 0.0) {
+            settings.exposure_time_us = value;
+        }
+    }
+
+    return settings;
+}
+
+void HikCamera::open(std::size_t device_index, const HikCameraSettings& settings) {
     close();
     initialize_sdk();
     sdk_initialized_ = true;
@@ -104,14 +155,15 @@ void HikCamera::open(std::size_t device_index) {
             throw std::runtime_error("Requested Hikvision camera index is unavailable.");
         }
 
-        open_device(devices.pDeviceInfo[device_index]);
+        open_device(devices.pDeviceInfo[device_index], settings);
     } catch (...) {
         close();
         throw;
     }
 }
 
-void HikCamera::open_by_serial_number(const std::string& requested_serial_number) {
+void HikCamera::open_by_serial_number(const std::string& requested_serial_number,
+                                      const HikCameraSettings& settings) {
     if (requested_serial_number.empty()) {
         throw std::invalid_argument("Camera serial number must not be empty.");
     }
@@ -125,7 +177,7 @@ void HikCamera::open_by_serial_number(const std::string& requested_serial_number
         for (unsigned int index = 0; index < devices.nDeviceNum; ++index) {
             MV_CC_DEVICE_INFO* device = devices.pDeviceInfo[index];
             if (device != nullptr && serial_number(*device) == requested_serial_number) {
-                open_device(device);
+                open_device(device, settings);
                 return;
             }
         }
@@ -138,44 +190,54 @@ void HikCamera::open_by_serial_number(const std::string& requested_serial_number
     }
 }
 
-void HikCamera::open_device(void* device_info) {
+void HikCamera::open_device(void* device_info, const HikCameraSettings& settings) {
     auto* device = static_cast<MV_CC_DEVICE_INFO*>(device_info);
     int result = MV_CC_CreateHandle(&handle_, device);
-        if (result != MV_OK) {
-            throw make_sdk_error("MV_CC_CreateHandle", result);
-        }
+    if (result != MV_OK) {
+        throw make_sdk_error("MV_CC_CreateHandle", result);
+    }
 
-        result = MV_CC_OpenDevice(handle_);
-        if (result != MV_OK) {
-            throw make_sdk_error("MV_CC_OpenDevice", result);
-        }
-        opened_ = true;
+    result = MV_CC_OpenDevice(handle_);
+    if (result != MV_OK) {
+        throw make_sdk_error("MV_CC_OpenDevice", result);
+    }
+    opened_ = true;
 
-        if (device->nTLayerType == MV_GIGE_DEVICE) {
-            const int packet_size = MV_CC_GetOptimalPacketSize(handle_);
-            if (packet_size > 0) {
-                result = MV_CC_SetIntValueEx(handle_, "GevSCPSPacketSize", packet_size);
-                if (result != MV_OK) {
-                    throw make_sdk_error("MV_CC_SetIntValueEx(GevSCPSPacketSize)", result);
-                }
+    if (device->nTLayerType == MV_GIGE_DEVICE) {
+        const int packet_size = MV_CC_GetOptimalPacketSize(handle_);
+        if (packet_size > 0) {
+            result = MV_CC_SetIntValueEx(handle_, "GevSCPSPacketSize", packet_size);
+            if (result != MV_OK) {
+                throw make_sdk_error("MV_CC_SetIntValueEx(GevSCPSPacketSize)", result);
             }
         }
+    }
 
-        result = MV_CC_SetEnumValueByString(handle_, "AcquisitionMode", "Continuous");
-        if (result != MV_OK) {
-            throw make_sdk_error("MV_CC_SetEnumValueByString(AcquisitionMode)", result);
-        }
+    if (settings.gain_db.has_value()) {
+        set_enum_value_by_string(handle_, "GainAuto", "Off");
+        set_float_value(handle_, "Gain", settings.gain_db.value());
+    }
 
-        result = MV_CC_SetEnumValueByString(handle_, "TriggerMode", "Off");
-        if (result != MV_OK) {
-            throw make_sdk_error("MV_CC_SetEnumValueByString(TriggerMode)", result);
-        }
+    if (settings.exposure_time_us.has_value()) {
+        set_enum_value_by_string(handle_, "ExposureAuto", "Off");
+        set_float_value(handle_, "ExposureTime", settings.exposure_time_us.value());
+    }
 
-        result = MV_CC_StartGrabbing(handle_);
-        if (result != MV_OK) {
-            throw make_sdk_error("MV_CC_StartGrabbing", result);
-        }
-        grabbing_ = true;
+    result = MV_CC_SetEnumValueByString(handle_, "AcquisitionMode", "Continuous");
+    if (result != MV_OK) {
+        throw make_sdk_error("MV_CC_SetEnumValueByString(AcquisitionMode)", result);
+    }
+
+    result = MV_CC_SetEnumValueByString(handle_, "TriggerMode", "Off");
+    if (result != MV_OK) {
+        throw make_sdk_error("MV_CC_SetEnumValueByString(TriggerMode)", result);
+    }
+
+    result = MV_CC_StartGrabbing(handle_);
+    if (result != MV_OK) {
+        throw make_sdk_error("MV_CC_StartGrabbing", result);
+    }
+    grabbing_ = true;
 }
 
 void HikCamera::close() noexcept {

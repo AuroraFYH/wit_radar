@@ -1,24 +1,25 @@
 {
   "camera": {
-    "sn": "DA3038934",
-    "image_width": 1440,
-    "image_height": 1080,
-    "camera_matrix": [23035.711615, 0.000000, 992.186305,
-                      0.000000, 23459.516607, 715.514390,
+    "sn": "DA6519626",
+    "gain_db": 7.0,
+    "exposure_time_us": 1000,
+    "image_width": 3072,
+    "image_height": 2048,
+    "camera_matrix": [32998.828683, 0.000000, 1537.820705,
+                      0.000000, 33092.073630, 1020.381491,
                       0.000000, 0.000000, 1.000000],
-    "distortion_coefficients": [-0.757195, 691.012381, 0.013341, -0.016557, 0.000000]
+    "distortion_coefficients": [1.014505, -26.460005, -0.004752, -0.009500, 0.000000]
   },
   "handeye": {
     "R_gimbal2imubody": [1.000000, 0.000000, 0.000000,
                            0.000000, 1.000000, 0.000000,
                            0.000000, 0.000000, 1.000000],
     "R_camera2gimbal": [
-          0.0, 0.0, 1.0,
-        -1.0, 0.0, 0.0,
-          0.0,-1.0, 0.0
-        ],
-    "t_camera2gimbal_m": [0.062, 0.041, 0.0645]
-  },
+        0.0,  0.0,  1.0,
+        -1.0,  0.0,  0.0,
+        0.0, -1.0,  0.0
+      ],
+      "t_camera2gimbal_m": [0.01695, 0.041, 0.0645]  },
   "pnp": {
     "light_square_width_m": 0.012,
     "light_square_height_m": 0.008,
@@ -28,14 +29,14 @@
     "ring_alignment_deg": 0.0
   },
   "laser": {
-    "t_laser_in_camera_m": [0.025, 0.020, -0.085],
-    "R_laser2camera": [ 0.0, -1.0,  0.0,
-                      0.0,  0.0, -1.0,
+    "t_laser_in_camera_m": [0.0, 0.0, 0.0],
+    "R_laser2camera": [ 0.0, 1.0,  0.0,
+                      0.0,  0.0, 1.0,
                       1.0,  0.0,  0.0 ],
     "beam_line_in_camera": {
-      "enabled": 0,
-      "point_m": [0.004048296, 0.010643722, 0.000183935],
-      "direction": [0.000287680, -0.017387900, 0.999848778]
+      "enabled": 1,
+      "point_m": [0.006024614, 0.005921423, -0.000104145],
+      "direction": [0.007632937, 0.009820561, 0.999922644]
     },
     "boresight_calibration": {
       "chessboard_inner_corners": [11, 8],
@@ -46,7 +47,7 @@
       "minimum_square_size_px": 14.0,
       "stable_frame_count": 8,
       "maximum_center_stddev_m": 0.005,
-      "processing_scale": 0.7
+      "processing_scale": 0.3
     }
   },
   "aim": {
@@ -56,19 +57,21 @@
     "max_marker_axis_residual_m": 0.10,
     "use_global_cylinder_pnp": 1,
     "allow_legacy_ippe_fallback": 0,
-    "max_global_reprojection_error_px": 3.0,
+    "max_global_reprojection_error_px": 12.0,
     "traditional_fallback_when_yolo_missing": 1,
     "max_yaw_correction_deg": 10.0,
     "max_pitch_correction_deg": 10.0,
     "world_yaw_feedback_sign": 1.0,
     "world_pitch_feedback_sign": -1.0,
+    "command_yaw_offset_deg": 0.0,
+    "command_pitch_offset_deg": -0.4,
     "static_compensation": {
-      "enabled": 1,
-      "range_min_m": 18.9,
-      "range_max_m": 25.6,
-      "yaw_constant_deg": 0.607,
-      "yaw_inverse_range_deg_m": -10.649,
-      "pitch_constant_deg": 0.259
+      "enabled": 0,
+      "range_min_m": 0,
+      "range_max_m": 0,
+      "yaw_constant_deg": 0,
+      "yaw_inverse_range_deg_m": 0,
+      "pitch_constant_deg": 0
     },
     "debug_log_every_n_frames": 30
   },
@@ -91,7 +94,7 @@
     "neural_weight": 0.5
   },
   "tracking": {
-    "enabled": 1,
+    "enabled": 0,
     "initialization_frames": 3,
     "initialization_max_spread_m": 0.15,
     "initialization_max_speed_mps": 12.0,
@@ -105,10 +108,11 @@
     "roi_measurement_enabled": 1,
     "roi_measurement_std_px": 20.0,
     "roi_innovation_gate_chi2": 9.21,
-    "camera_frame_latency_ms": 0,
+    "camera_frame_latency_ms": 50,
     "gimbal_state_receive_latency_ms": 0,
-    "state_interpolation_max_gap_ms": 30,
-    "state_nearest_max_offset_ms": 15,
+    "use_latest_gimbal_state_for_frame": 1,
+    "state_interpolation_max_gap_ms": 150,
+    "state_nearest_max_offset_ms": 120,
     "observation_tangential_std_floor_m": 0.010,
     "observation_radial_std_floor_m": 0.030,
     "observation_reprojection_std_px_floor": 0.5,
